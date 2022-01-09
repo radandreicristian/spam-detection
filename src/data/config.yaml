@@ -1,0 +1,4 @@
+embeddings:
+  path: data/embeddings
+  sources:
+    word2vec: https://drive.google.com/uc?id=0B7XkCwpI5KDYNlNUTTlSS21pQmM&export=download
