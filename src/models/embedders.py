@@ -1,66 +1,95 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Dict
 
-import gensim
-import torch
-
-from src.models.padding import pad_tensor
+import fasttext
+import fasttext.util
+import numpy as np
 
 logger = logging.getLogger()
 logger.setLevel(logging.WARNING)
+
+from copy import deepcopy
 
 
 class BaseEmbedder(ABC):
 
     @abstractmethod
-    def embed(self,
-              sequence: List[str]) -> torch.Tensor:
+    def get_weights(self) -> np.ndarray:
         pass
 
     @abstractmethod
-    def pad(self,
-            sequence: torch.Tensor) -> torch.Tensor:
+    def get_vocab(self) -> List:
+        pass
+
+    @abstractmethod
+    def get_word2idx(self) -> Dict:
         pass
 
 
 class FastTextEmbedder(BaseEmbedder):
 
     def __init__(self,
+                 *args,
                  **kwargs):
         embeddings_path = kwargs.get("path")
-        self.max_seq_len = kwargs.get("max_seq_len")
-        self.embeddings = gensim.models.keyedvectors.load_word2vec_format(embeddings_path, binary=False)
+        pretrained_embeddings = fasttext.load_model(embeddings_path)
+        d_embedding_pretrained = pretrained_embeddings.get_dimension()
+        d_embedding = kwargs.get("dimension")
+        pretrained_embeddings = fasttext.util.reduce_model(pretrained_embeddings, d_embedding) \
+            if d_embedding_pretrained != d_embedding else pretrained_embeddings
 
-    def embed(self,
-              sequence: str) -> torch.Tensor:
-        split_sequence = sequence.split()
-        seq_len = len(split_sequence)
+        vocab = kwargs.get("vocab")
+        word2idx = kwargs.get("word2idx")
 
-        d_embedding = len(self.embeddings.get_vector("anything"))
-        sequence_embedding = torch.zeros(size=(seq_len, d_embedding))
-        for index, token in enumerate(split_sequence):
-            try:
-                embedding = torch.tensor(self.embeddings.get_vector(token),
-                                         dtype=torch.float32)
-                sequence_embedding[index, :] = embedding
-            except KeyError:
-                logger.debug(f"Not found in dictionary: {token}")
-        return sequence_embedding
+        weights = np.empty((len(vocab), d_embedding))
 
-    def pad(self,
-            sequence: torch.Tensor) -> torch.Tensor:
-        return pad_tensor(sequence=sequence,
-                          max_seq_len=self.max_seq_len)
+        # Initialize vectors for "" and "UNK"
+        weights[0] = np.zeros(d_embedding, dtype='float32')
+        weights[1] = np.random.uniform(-.25, .25, d_embedding)
+
+        word2idx_copy = deepcopy(word2idx)
+        word2idx_copy.pop("")
+        word2idx_copy.pop("UNK")
+        for word, idx in word2idx_copy.items():
+            embedding = pretrained_embeddings[word]
+            weights[idx] = embedding
+
+        self.vocab = vocab
+        self.word2idx = word2idx
+        self.weights = weights
+
+    def get_weights(self):
+        return self.weights
+
+    def get_vocab(self) -> List:
+        return self.vocab
+
+    def get_word2idx(self) -> Dict:
+        return self.word2idx
+
+
+class TrainableEmbedder(BaseEmbedder):
+    def __init__(self, **kwargs):
+        pass
 
 
 class EmbedderFactory:
 
     @staticmethod
-    def get_embedder(*args,
+    def get_embedder(vocab,
+                     word2idx,
+                     *args,
                      **kwargs) -> BaseEmbedder:
-        tag = kwargs.get("tag", "")
-        if tag == "fasttext":
+        embedding_type = kwargs.get("used_embeddings")
+        embedding_type_cfg = kwargs.get(embedding_type, {})
+
+        kwargs = {'vocab': vocab,
+                  'word2idx': word2idx,
+                  **embedding_type_cfg}
+        if embedding_type == "pretrained_fasttext":
             return FastTextEmbedder(**kwargs)
+        if embedding_type == "trainable":
+            return TrainableEmbedder(**kwargs)
         else:
             raise ValueError('Invalid embedder name.')

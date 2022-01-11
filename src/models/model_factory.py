@@ -7,12 +7,16 @@ import pytorch_lightning as pl
 class ClassificationModelFactory:
 
     @staticmethod
-    def get_model(model: str,
+    def get_model(embedder,
                   *args,
                   **kwargs) -> pl.LightningModule:
-        if model == "rnn":
+        used_model = kwargs.get("used_model")
+        used_model_config = kwargs.get(used_model)
+
+        kwargs = {'embedder': embedder, **used_model_config}
+        if used_model == "rnn":
             return RnnSpamClassifier(**kwargs)
-        elif model == "lstm":
+        elif used_model == "lstm":
             return LstmSpamClassifier(**kwargs)
         else:
-            raise ValueError(f'"{model}" is not a valid classification model.')
+            raise ValueError(f'"{used_model}" is not a valid classification model.')

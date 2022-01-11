@@ -1,47 +1,62 @@
+import logging
+from pathlib import Path
+
 import hydra
+import pandas as pd
+import pytorch_lightning as pl
 from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 
+from data.split_data import create_vocabulary, create_datasets
 from models.embedders import EmbedderFactory
-
-import pytorch_lightning as pl
-
-from data.datamodule import SpamDataModule
 from models.model_factory import ClassificationModelFactory
+from src.data.datamodule import SpamDataModule
 
-from pathlib import Path
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
 
-@hydra.main(config_name="config.yaml")
+@hydra.main(config_path='conf',
+            config_name="config.yaml")
 def main(cfg: DictConfig):
     project_root_path = Path(__file__).parents[1].absolute()
 
-    train_path = Path(project_root_path / 'data/processed/train/data.csv')
-    valid_path = Path(project_root_path / 'data/processed/valid/data.csv')
-    test_path = Path(project_root_path / 'data/processed/test/data.csv')
+    # Create datasets
+    splits = ['train', 'valid', 'test']
+    data_cfg = cfg.get("data", {})
 
-    model_name = cfg.get("model_name", "")
-    model_cfg = cfg.get("model", {}).get(model_name, {})
+    preprocessed_data_path = data_cfg.get("preprocessed_path")
+    preprocessed_data_df = pd.read_csv(Path(project_root_path / preprocessed_data_path))
+
+    paths = [Path(project_root_path / f'data/processed/{split}/data.csv') for split in splits]
+    create_datasets(preprocessed_data_df, splits, *paths)
+
+    # Create the vocabulary
+    vocab, word2idx = create_vocabulary(preprocessed_data_df, **data_cfg)
+
+    model_cfg = cfg.get("model", {})
 
     embedder_cfg = cfg.get("embeddings", {})
     training_cfg = cfg.get("training", {})
 
     n_epochs = training_cfg.get("n_epochs")
-    max_seq_len = model_cfg.get("max_seq_len")
 
     # Create the embedder
-    embedder = EmbedderFactory.get_embedder(**embedder_cfg, max_seq_len=max_seq_len)
+    embedder = EmbedderFactory.get_embedder(vocab=vocab,
+                                            word2idx=word2idx,
+                                            **embedder_cfg)
 
     # Create the model
-    model = ClassificationModelFactory.get_model(model_name, **model_cfg)
+    model = ClassificationModelFactory.get_model(embedder=embedder,
+                                                 **model_cfg)
+
+    b = 0
 
     # Create the data modules
-    rnn_datamodule = SpamDataModule(train_path=train_path,
-                                    valid_path=valid_path,
-                                    test_path=test_path,
-                                    train_batch_size=4,
-                                    embedder=embedder)
+    datamodule = SpamDataModule(paths=list(paths),
+                                train_batch_size=32,
+                                word2idx=word2idx)
 
     # Create the callbacks
     checkpoint_callback = ModelCheckpoint(monitor="valid_f1",
@@ -57,7 +72,7 @@ def main(cfg: DictConfig):
 
     # Train the model
     trainer.fit(model=model,
-                datamodule=rnn_datamodule)
+                datamodule=datamodule)
 
 
 if __name__ == '__main__':

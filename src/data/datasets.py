@@ -8,21 +8,19 @@ from torch.utils.data import Dataset
 class SpamDataset(Dataset):
     def __init__(self,
                  data: pd.DataFrame,
-                 embedder) -> None:
+                 word2idx: dict) -> None:
         self.data = data
-        self.embedder = embedder
+        self.word2idx = word2idx
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self,
-                    item_idx: int) -> dict:
+                    item_idx: int) -> Tuple:
         item = self.data.iloc[item_idx]
-        sequence = item["content"]
-        label = torch.tensor(item["label"], dtype=torch.float32)
+        sequence = item["content"].split()
+        label = torch.tensor(item["label"], dtype=torch.float)
 
-        embeddings = self.embedder.embed(sequence)
-        padded_embeddings = self.embedder.pad(embeddings)
+        sequence = list(map(lambda x: self.word2idx.get(x, 1), sequence))
 
-        return {"embeddings": padded_embeddings,
-                "labels": label}
+        return sequence, label

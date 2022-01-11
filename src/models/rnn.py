@@ -5,7 +5,7 @@ import torch.nn as nn
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 from torch.optim import AdamW
 from torchmetrics import F1, Recall
-
+from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence, pack_padded_sequence
 from models.base_model import BaseSpamClassifier
 
 
@@ -58,9 +58,10 @@ class RnnSpamClassifier(BaseSpamClassifier):
                         "recall": self.recall}
 
     def forward(self, x):
-        # x (batch_size, max_seq_len, d_embedding)
+        # x (batch_size, seq_len, d_embedding)
+        x = pad_sequence()
 
-        # features (batch_size, max_seq_len, D * d_hidden), D=2 if bidirectional, 1 otherwise
+        # features (batch_size, seq_len, D * d_hidden), D=2 if bidirectional, 1 otherwise
         features, _ = self.rnn(x)
 
         # take only the output of the last cell
@@ -79,7 +80,7 @@ class RnnSpamClassifier(BaseSpamClassifier):
     def common_step(self,
                     batch: Any,
                     batch_idx: int) -> STEP_OUTPUT:
-        embeddings = batch['embeddings']
+        embeddings = batch['sequence']
         labels = batch['labels']
         predictions = self(embeddings)
 

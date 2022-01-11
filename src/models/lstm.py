@@ -4,9 +4,12 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 from pytorch_lightning.utilities.types import STEP_OUTPUT
-from torch.optim import AdamW
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
+from torch.optim import Adam
 from torchmetrics import F1, Recall
 from models.base_model import BaseSpamClassifier
+
+from models.embedders import BaseEmbedder
 
 
 class LstmSpamClassifier(BaseSpamClassifier):
@@ -25,6 +28,16 @@ class LstmSpamClassifier(BaseSpamClassifier):
         self.d_input = hyper_cfg.get("d_input")
         self.learning_rate = hyper_cfg.get("learning_rate")
 
+        embedder: BaseEmbedder = kwargs.get("embedder")
+
+        weights = torch.tensor(embedder.get_weights(), dtype=torch.float)
+
+        n_embeddings, d_embedding = weights.shape
+
+        self.embedding = nn.Embedding(num_embeddings=n_embeddings,
+                                      embedding_dim=d_embedding,
+                                      _weight=weights)
+
         self.lstm = nn.LSTM(input_size=self.d_input,
                             hidden_size=self.d_hidden,
                             num_layers=self.n_layers,
@@ -33,7 +46,7 @@ class LstmSpamClassifier(BaseSpamClassifier):
                             bidirectional=self.bidirectional)
 
         self.d_hidden_mlp = self.d_hidden * self.bidirectional_multiplier
-
+        """
         self.mlp = nn.ModuleList([
             nn.Linear(in_features=self.d_hidden_mlp,
                       out_features=self.d_hidden_mlp // 2),
@@ -42,6 +55,9 @@ class LstmSpamClassifier(BaseSpamClassifier):
             nn.Linear(in_features=self.d_hidden_mlp // 2,
                       out_features=1)
         ])
+        """
+        self.mlp = nn.ModuleList([nn.Linear(in_features=self.d_hidden_mlp,
+                                            out_features=1)])
 
         self.sigmoid = nn.Sigmoid()
         self.criterion = nn.BCELoss()
@@ -52,12 +68,26 @@ class LstmSpamClassifier(BaseSpamClassifier):
         self.metrics = {"f1": self.f1,
                         "recall": self.recall}
 
-    def forward(self, x, *args, **kwargs) -> Any:
-        # features (batch_size, max_seq_len, D * d_hidden)
-        features, _ = self.lstm(x)
+    def forward(self,
+                x: torch.Tensor,
+                *args,
+                **kwargs) -> torch.Tensor:
+        embeddings = self.embedding(x)
 
+        lengths = torch.tensor(list(map(len, x)))
+
+        packed_embeddings = pack_padded_sequence(embeddings, lengths, batch_first=True, enforce_sorted=True)
+
+        # features (batch_size, max_seq_len, D * d_hidden)
+        lstm_out, (_, _) = self.lstm(packed_embeddings)
+
+        output, sizes = pad_packed_sequence(lstm_out, batch_first=True)
+
+        # https://discuss.pytorch.org/t/get-each-sequences-last-item-from-packed-sequence/41118/3
+        last_seq = [output[e, i - 1, :].unsqueeze(0) for e, i in enumerate(sizes)]
+        features = torch.cat(last_seq, dim=0)
         # features (batch_size, 1, D * d_hidden)
-        features = features[:, -1, :]
+        # features = lstm_out[:, -1, :]
 
         for mlp_layer in self.mlp:
             features = mlp_layer(features)
@@ -73,9 +103,9 @@ class LstmSpamClassifier(BaseSpamClassifier):
     def common_step(self,
                     batch: Any,
                     batch_idx: int) -> STEP_OUTPUT:
-        embeddings = batch['embeddings']
-        labels = batch['labels']
-        predictions = self(embeddings)
+        sequence, labels = batch
+
+        predictions = self(sequence)
 
         loss = self.criterion(predictions, labels)
 
@@ -119,6 +149,6 @@ class LstmSpamClassifier(BaseSpamClassifier):
         return predictions
 
     def configure_optimizers(self):
-        optimizer = AdamW(self.parameters(),
-                          lr=self.learning_rate)
+        optimizer = Adam(self.parameters(),
+                         lr=self.learning_rate)
         return optimizer
