@@ -8,7 +8,7 @@ from omegaconf import DictConfig
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from data.split_data import create_vocabulary, create_datasets
+from data.utils import create_vocabulary, create_datasets
 from models.embedders import EmbedderFactory
 from models.model_factory import ClassificationModelFactory
 from src.data.datamodule import SpamDataModule
@@ -19,21 +19,22 @@ logger.setLevel(logging.DEBUG)
 
 @hydra.main(config_path='conf',
             config_name="config.yaml")
-def main(cfg: DictConfig):
+def train(cfg: DictConfig):
     project_root_path = Path(__file__).parents[1].absolute()
 
     # Create datasets
-    splits = ['train', 'valid', 'test']
+    splits = ('train', 'valid', 'test')
     data_cfg = cfg.get("data", {})
 
     preprocessed_data_path = data_cfg.get("preprocessed_path")
     preprocessed_data_df = pd.read_csv(Path(project_root_path / preprocessed_data_path))
 
-    paths = [Path(project_root_path / f'data/processed/{split}/data.csv') for split in splits]
-    create_datasets(preprocessed_data_df, splits, *paths)
+    paths = tuple([Path(project_root_path / f'data/processed/{split}/data.csv') for split in splits])
+    create_datasets(preprocessed_data_df, splits, paths)
 
     # Create the vocabulary
-    vocab, word2idx = create_vocabulary(preprocessed_data_df, **data_cfg)
+    content = preprocessed_data_df['content']
+    vocab, word2idx = create_vocabulary(content, **data_cfg)
 
     model_cfg = cfg.get("model", {})
 
@@ -51,15 +52,13 @@ def main(cfg: DictConfig):
     model = ClassificationModelFactory.get_model(embedder=embedder,
                                                  **model_cfg)
 
-    b = 0
-
     # Create the data modules
-    datamodule = SpamDataModule(paths=list(paths),
-                                train_batch_size=32,
+    datamodule = SpamDataModule(paths=paths,
+                                batch_size=32,
                                 word2idx=word2idx)
 
     # Create the callbacks
-    checkpoint_callback = ModelCheckpoint(monitor="valid_f1",
+    checkpoint_callback = ModelCheckpoint(monitor="valid_epoch_f1",
                                           filename="spam_detector_model",
                                           save_top_k=1,
                                           mode="min")
@@ -77,4 +76,4 @@ def main(cfg: DictConfig):
 
 if __name__ == '__main__':
     pl.seed_everything(21)
-    main()
+    train()

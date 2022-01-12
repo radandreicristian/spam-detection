@@ -1,4 +1,5 @@
 import pytorch_lightning as pl
+from torchmetrics import F1, Recall
 
 
 class BaseSpamClassifier(pl.LightningModule):
@@ -6,37 +7,8 @@ class BaseSpamClassifier(pl.LightningModule):
     def __init__(self):
         super(BaseSpamClassifier, self).__init__()
 
-    def reset_all_metrics(self):
-        metrics = self.metrics.values()
-        for metric in metrics:
-            metric.reset()
+        self.train_f1 = F1(num_classes=1).to(self.device)
+        self.valid_f1 = F1(num_classes=1).to(self.device)
 
-    def update_all_metrics(self, predictions, labels):
-        metrics = self.metrics.values()
-        for metric in metrics:
-            metric.update(preds=predictions,
-                          target=labels)
-
-    def log_metrics(self,
-                    prefix: str) -> None:
-
-        if prefix not in ["train", "valid"]:
-            raise ValueError("Invalid preffix (shoud be train or valid)")
-        metrics = {f"{prefix}_{k}": v for k, v in self.metrics.items()}
-        self.log_dict(metrics)
-
-    # Training-step specific methods
-    def on_train_epoch_start(self) -> None:
-        self.reset_all_metrics()
-
-    def on_train_epoch_end(self) -> None:
-        self.log_metrics(prefix="train")
-        self.reset_all_metrics()
-
-    # Validation-step specific methods
-    def on_validation_epoch_start(self) -> None:
-        self.reset_all_metrics()
-
-    def on_validation_epoch_end(self) -> None:
-        self.log_metrics(prefix="valid")
-        self.reset_all_metrics()
+        self.train_recall = Recall(num_classes=1).to(self.device)
+        self.valid_recall = Recall(num_classes=1).to(self.device)

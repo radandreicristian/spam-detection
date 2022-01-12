@@ -1,15 +1,14 @@
 from typing import Any, Optional
 
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from pytorch_lightning.utilities.types import STEP_OUTPUT
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
-from torch.optim import Adam
-from torchmetrics import F1, Recall
-from models.base_model import BaseSpamClassifier
+from torchmetrics import F1
 
-from models.embedders import BaseEmbedder
+from src.models.base_model import BaseSpamClassifier
+from src.models.embedders import BaseEmbedder
+from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from torch.optim import Adam, AdamW
 
 
 class LstmSpamClassifier(BaseSpamClassifier):
@@ -38,6 +37,10 @@ class LstmSpamClassifier(BaseSpamClassifier):
                                       embedding_dim=d_embedding,
                                       _weight=weights)
 
+        # Freeze embedding layer
+        for param in self.embedding.parameters():
+            param.requires_grad = False
+
         self.lstm = nn.LSTM(input_size=self.d_input,
                             hidden_size=self.d_hidden,
                             num_layers=self.n_layers,
@@ -46,27 +49,12 @@ class LstmSpamClassifier(BaseSpamClassifier):
                             bidirectional=self.bidirectional)
 
         self.d_hidden_mlp = self.d_hidden * self.bidirectional_multiplier
-        """
-        self.mlp = nn.ModuleList([
-            nn.Linear(in_features=self.d_hidden_mlp,
-                      out_features=self.d_hidden_mlp // 2),
-            nn.ReLU(),
-            nn.Dropout(self.p_dropout),
-            nn.Linear(in_features=self.d_hidden_mlp // 2,
-                      out_features=1)
-        ])
-        """
+
         self.mlp = nn.ModuleList([nn.Linear(in_features=self.d_hidden_mlp,
                                             out_features=1)])
 
         self.sigmoid = nn.Sigmoid()
         self.criterion = nn.BCELoss()
-
-        self.f1 = F1(num_classes=1).to(self.device)
-        self.recall = Recall(num_classes=1).to(self.device)
-
-        self.metrics = {"f1": self.f1,
-                        "recall": self.recall}
 
     def forward(self,
                 x: torch.Tensor,
@@ -87,7 +75,6 @@ class LstmSpamClassifier(BaseSpamClassifier):
         last_seq = [output[e, i - 1, :].unsqueeze(0) for e, i in enumerate(sizes)]
         features = torch.cat(last_seq, dim=0)
         # features (batch_size, 1, D * d_hidden)
-        # features = lstm_out[:, -1, :]
 
         for mlp_layer in self.mlp:
             features = mlp_layer(features)
@@ -109,28 +96,39 @@ class LstmSpamClassifier(BaseSpamClassifier):
 
         loss = self.criterion(predictions, labels)
 
-        int_labels = labels.int().to(self.device)
-        self.update_all_metrics(predictions=predictions,
-                                labels=int_labels)
+        labels = labels.int().to(self.device)
 
         return {"loss": loss,
-                "metrics": self.metrics}
+                "predicted": predictions,
+                "labels": labels}
 
     def training_step(self,
                       batch: Any,
                       batch_idx: int) -> STEP_OUTPUT:  # type: ignore
-        loss, metrics = self.common_step(batch, batch_idx).values()
+        loss, predicted, labels = self.common_step(batch, batch_idx).values()
+
+        self.train_f1(predicted, labels)
+        self.log("train_f1", self.train_f1, on_step=True, on_epoch=False)
 
         self.log("train_loss", loss)
-        # self.log("train_loss", self.train_loss, on_epoch=True)
         return loss
+
+    def training_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
+        self.log("train_epoch_f1", self.train_f1)
 
     def validation_step(self,
                         batch: Any,
                         batch_idx: int) -> Optional[STEP_OUTPUT]:
-        loss, metrics = self.common_step(batch, batch_idx).values()
+        loss, predicted, labels = self.common_step(batch, batch_idx).values()
+
+        self.valid_f1(predicted, labels)
+        self.log("valid_f1", self.valid_f1, on_step=True, on_epoch=False)
+
         self.log("valid_loss", loss, on_epoch=True)
         return loss
+
+    def validation_epoch_end(self, outputs: EPOCH_OUTPUT) -> None:
+        self.log("valid_epoch_f1", self.valid_f1)
 
     def test_step(self,
                   batch: Any,
@@ -149,6 +147,6 @@ class LstmSpamClassifier(BaseSpamClassifier):
         return predictions
 
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(),
-                         lr=self.learning_rate)
+        optimizer = AdamW(self.parameters(),
+                          lr=self.learning_rate)
         return optimizer
