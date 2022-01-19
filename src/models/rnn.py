@@ -2,11 +2,11 @@ from typing import Any, Optional
 
 import torch
 import torch.nn as nn
-from src.models.base_model import BaseSpamClassifier
 from pytorch_lightning.utilities.types import STEP_OUTPUT, EPOCH_OUTPUT
-from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from torch.optim import AdamW
 
+from src.models.base_model import BaseSpamClassifier
 from src.models.embedders import BaseEmbedder
 
 
@@ -38,8 +38,10 @@ class RnnSpamClassifier(BaseSpamClassifier):
                                       _weight=weights)
 
         # Freeze embedding layer
-        for param in self.embedding.parameters():
-            param.requires_grad = False
+        has_pretrained_embeddings = kwargs.get("has_pretrained_embeddings")
+        if has_pretrained_embeddings:
+            for param in self.embedding.parameters():
+                param.requires_grad = False
 
         self.rnn = nn.RNN(input_size=self.d_input,
                           hidden_size=self.d_hidden,
@@ -59,7 +61,8 @@ class RnnSpamClassifier(BaseSpamClassifier):
 
         # https://stackoverflow.com/a/54816498/10831784
         for p in self.parameters():
-            p.register_hook(lambda grad: torch.clamp(grad, -self.clip_value, self.clip_value))
+            if p.requires_grad:
+                p.register_hook(lambda grad: torch.clamp(grad, -self.clip_value, self.clip_value))
 
     def forward(self, x):
         # x (batch_size, seq_len, d_embedding)
@@ -67,19 +70,22 @@ class RnnSpamClassifier(BaseSpamClassifier):
 
         lengths = torch.tensor(list(map(len, x)))
 
-        packed_embeddings = pack_padded_sequence(embeddings, lengths, batch_first=True, enforce_sorted=True)
+        packed_embeddings = pack_padded_sequence(embeddings,
+                                                 lengths,
+                                                 batch_first=True,
+                                                 enforce_sorted=True)
 
         # features (batch_size, seq_len, D * d_hidden), D=2 if bidirectional, 1 otherwise
-        rnn_out, _ = self.rnn(x)
+        rnn_out, _ = self.rnn(packed_embeddings)
 
-        output, sizes = pad_packed_sequence(rnn_out, batch_first=True)
+        output, sizes = pad_packed_sequence(rnn_out,
+                                            batch_first=True)
         # take only the output of the last cell
         # features (batch_size, 1, D * d_hidden)
 
         last_seq = [output[e, i - 1, :].unsqueeze(0) for e, i in enumerate(sizes)]
         features = torch.cat(last_seq, dim=0)
 
-        features = features[:, -1, :]
         for mlp_layer in self.mlp:
             features = mlp_layer(features)
 
@@ -110,8 +116,7 @@ class RnnSpamClassifier(BaseSpamClassifier):
         loss, predicted, labels = self.common_step(batch, batch_idx).values()
 
         self.train_f1(predicted, labels)
-        self.log("train_f1", self.train_f1, on_step=True, on_epoch=False)
-
+        self.log("train_f1", self.train_f1)
         self.log("train_loss", loss)
         return loss
 
@@ -124,8 +129,8 @@ class RnnSpamClassifier(BaseSpamClassifier):
         loss, predicted, labels = self.common_step(batch, batch_idx).values()
 
         self.valid_f1(predicted, labels)
-        self.log("valid_f1", self.valid_f1, on_step=True, on_epoch=False)
 
+        self.log("valid_f1", self.valid_f1, on_step=True, on_epoch=False)
         self.log("valid_loss", loss, on_epoch=True)
         return loss
 
@@ -135,10 +140,13 @@ class RnnSpamClassifier(BaseSpamClassifier):
     def test_step(self,
                   batch: Any,
                   batch_idx: int) -> Optional[STEP_OUTPUT]:
-        _, metrics = self.common_step(batch, batch_idx)
-        self.log_dict(metrics)
+        loss, predicted, labels = self.common_step(batch, batch_idx).values()
+        self.test_f1(predicted, labels)
 
-        return metrics
+        return loss
+
+    def test_step_end(self, *args, **kwargs) -> None:
+        self.log("test_f1", self.test_f1)
 
     def predict_step(self,
                      batch: Any,

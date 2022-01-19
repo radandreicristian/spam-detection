@@ -69,9 +69,96 @@ class FastTextEmbedder(BaseEmbedder):
         return self.word2idx
 
 
+class GloveEmbedder(BaseEmbedder):
+
+    def __init__(self,
+                 *args,
+                 **kwargs):
+        self.embeddings_path = kwargs.get("path")
+        self.embedding_index = {}
+        self.read_embeddings()
+        self.d_embedding = kwargs.get("dimension")
+
+        vocab = kwargs.get("vocab")
+        word2idx = kwargs.get("word2idx")
+
+        weights = np.empty((len(vocab), self.d_embedding))
+
+        # Initialize vectors for "" and "UNK"
+        weights[0] = np.zeros(self.d_embedding, dtype='float32')
+        weights[1] = np.random.uniform(-.25, .25, self.d_embedding)
+
+        word2idx_copy = deepcopy(word2idx)
+        word2idx_copy.pop("")
+        word2idx_copy.pop("UNK")
+
+        glove_vocab = self.embedding_index.keys()
+        for word, idx in word2idx_copy.items():
+            if word in glove_vocab:
+                embedding = self.embedding_index[word]
+            else:
+                embedding = weights[1]
+            weights[idx] = embedding
+
+        self.vocab = vocab
+        self.word2idx = word2idx
+        self.weights = weights
+
+    def get_weights(self):
+        return self.weights
+
+    def get_vocab(self) -> List:
+        return self.vocab
+
+    def get_word2idx(self) -> Dict:
+        return self.word2idx
+
+    def read_embeddings(self):
+        f = open(self.embeddings_path, encoding="utf-8")
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            self.embedding_index[word] = coefs
+        f.close()
+
+
 class TrainableEmbedder(BaseEmbedder):
-    def __init__(self, **kwargs):
-        pass
+
+    def __init__(self,
+                 *args,
+                 **kwargs):
+        self.embeddings_path = kwargs.get("path")
+        self.d_embedding = kwargs.get("dimension")
+
+        vocab = kwargs.get("vocab")
+        word2idx = kwargs.get("word2idx")
+
+        weights = np.empty((len(vocab), self.d_embedding))
+
+        # Initialize vectors for "" and "UNK"
+        weights[0] = np.zeros(self.d_embedding, dtype='float32')
+        weights[1] = np.random.uniform(-.25, .25, self.d_embedding)
+
+        word2idx_copy = deepcopy(word2idx)
+        word2idx_copy.pop("")
+        word2idx_copy.pop("UNK")
+
+        for word, idx in word2idx_copy.items():
+            weights[idx] = np.random.uniform(-.25, .25, self.d_embedding)
+
+        self.vocab = vocab
+        self.word2idx = word2idx
+        self.weights = weights
+
+    def get_weights(self):
+        return self.weights
+
+    def get_vocab(self) -> List:
+        return self.vocab
+
+    def get_word2idx(self) -> Dict:
+        return self.word2idx
 
 
 class EmbedderFactory:
@@ -89,6 +176,8 @@ class EmbedderFactory:
                   **embedding_type_cfg}
         if embedding_type == "pretrained_fasttext":
             return FastTextEmbedder(**kwargs)
+        if embedding_type == "glove":
+            return GloveEmbedder(**kwargs)
         if embedding_type == "trainable":
             return TrainableEmbedder(**kwargs)
         else:

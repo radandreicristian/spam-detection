@@ -10,7 +10,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 from data.utils import create_vocabulary, create_datasets
 from models.embedders import EmbedderFactory
-from models.model_factory import ClassificationModelFactory
+from models.model_factory import DlModelFactory
 from src.data.datamodule import SpamDataModule
 
 logger = logging.getLogger()
@@ -18,7 +18,7 @@ logger.setLevel(logging.DEBUG)
 
 
 @hydra.main(config_path='conf',
-            config_name="config.yaml")
+            config_name="dl_config.yaml")
 def train(cfg: DictConfig):
     project_root_path = Path(__file__).parents[1].absolute()
 
@@ -30,7 +30,7 @@ def train(cfg: DictConfig):
     preprocessed_data_df = pd.read_csv(Path(project_root_path / preprocessed_data_path))
 
     paths = tuple([Path(project_root_path / f'data/processed/{split}/data.csv') for split in splits])
-    create_datasets(preprocessed_data_df, splits, paths)
+    _ = create_datasets(preprocessed_data_df, splits, paths)
 
     # Create the vocabulary
     content = preprocessed_data_df['content']
@@ -43,23 +43,24 @@ def train(cfg: DictConfig):
 
     n_epochs = training_cfg.get("n_epochs")
 
+    batch_size = training_cfg.get("batch_size")
     # Create the embedder
     embedder = EmbedderFactory.get_embedder(vocab=vocab,
                                             word2idx=word2idx,
                                             **embedder_cfg)
 
     # Create the model
-    model = ClassificationModelFactory.get_model(embedder=embedder,
-                                                 **model_cfg)
+    model = DlModelFactory.create_model(embedder=embedder,
+                                        **model_cfg)
 
     # Create the data modules
     datamodule = SpamDataModule(paths=paths,
-                                batch_size=32,
+                                batch_size=batch_size,
                                 word2idx=word2idx)
 
     # Create the callbacks
-    checkpoint_callback = ModelCheckpoint(monitor="valid_epoch_f1",
-                                          filename="spam_detector_model",
+    checkpoint_callback = ModelCheckpoint(monitor="valid_loss",
+                                          filename="spam_detector_{epoch:02d}_{valid_loss:.2f}",
                                           save_top_k=1,
                                           mode="min")
 
@@ -72,6 +73,14 @@ def train(cfg: DictConfig):
     # Train the model
     trainer.fit(model=model,
                 datamodule=datamodule)
+
+    best_model_path = checkpoint_callback.best_model_path
+    best_model = DlModelFactory.load_from_checkpoint(checkpoint_path=best_model_path,
+                                                     embedder=embedder,
+                                                     **model_cfg)
+
+    trainer.test(model=best_model,
+                 datamodule=datamodule)
 
 
 if __name__ == '__main__':

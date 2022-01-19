@@ -1,0 +1,39 @@
+data:
+  preprocessed_path: data/processed/preprocessed_data.csv
+  ignore_rare_words: True
+  rare_words_threshold: 1
+embeddings:
+  used_embeddings: glove
+  pretrained_fasttext:
+    path: /home/andrei-cristian/projects/spam_detection/data/embeddings/ft/cc.en.300.bin
+    dimension: 100
+  glove:
+    path: /home/andrei-cristian/projects/spam_detection/data/embeddings/glove/twitter_100d.txt
+    dimension: 100
+  trainable:
+    dimension: 100
+model:
+  used_model: rnn
+  rnn:
+    has_pretrained_embeddings: False
+    hyper:
+      activation: relu
+      bidirectional: true
+      d_input: 100
+      d_hidden: 64
+      n_layers: 3
+      p_dropout: 0.25
+      learning_rate: 0.001
+      clip_value: 0.5
+  lstm:
+    has_pretrained_embeddings: True
+    hyper:
+      bidirectional: True
+      d_input: 100
+      d_hidden: 16
+      n_layers: 2
+      p_dropout: 0.25
+      learning_rate: 2e-2
+training:
+  n_epochs: 50
+  batch_size: 64

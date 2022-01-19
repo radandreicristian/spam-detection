@@ -102,7 +102,7 @@ def save_data(dfs: Dict[str, pd.DataFrame],
 
 def create_datasets(df: pd.DataFrame,
                     splits: Tuple,
-                    paths: Tuple) -> None:
+                    paths: Tuple) -> dict:
     """
     A wrapper to create the datasets.
 
@@ -114,3 +114,4 @@ def create_datasets(df: pd.DataFrame,
     """
     dfs = split_data(df, splits)
     save_data(dfs, paths)
+    return dfs

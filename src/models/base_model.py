@@ -1,5 +1,5 @@
 import pytorch_lightning as pl
-from torchmetrics import F1, Recall
+from torchmetrics import F1
 
 
 class BaseSpamClassifier(pl.LightningModule):
@@ -9,6 +9,4 @@ class BaseSpamClassifier(pl.LightningModule):
 
         self.train_f1 = F1(num_classes=1).to(self.device)
         self.valid_f1 = F1(num_classes=1).to(self.device)
-
-        self.train_recall = Recall(num_classes=1).to(self.device)
-        self.valid_recall = Recall(num_classes=1).to(self.device)
+        self.test_f1 = F1(num_classes=1).to(self.device)

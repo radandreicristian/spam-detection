@@ -35,6 +35,7 @@ class SpamDataModule(pl.LightningDataModule):
 
         self.train_sampler: Optional[WeightedRandomSampler] = None
         self.valid_sampler: Optional[WeightedRandomSampler] = None
+
         self.train_dataset: Optional[SpamDataset] = None
         self.valid_dataset: Optional[SpamDataset] = None
         self.test_dataset: Optional[SpamDataset] = None
