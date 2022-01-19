@@ -5,10 +5,10 @@ data:
 embeddings:
   used_embeddings: glove
   pretrained_fasttext:
-    path: /home/andrei-cristian/projects/spam_detection/data/embeddings/ft/cc.en.300.bin
+    path: /home/andrei-cristian/projects/spam_detection/data/embeddings/cc.en.300.bin
     dimension: 100
   glove:
-    path: /home/andrei-cristian/projects/spam_detection/data/embeddings/glove/twitter_100d.txt
+    path: /home/andrei-cristian/projects/spam_detection/data/embeddings/twitter_100d.txt
     dimension: 100
   trainable:
     dimension: 100
