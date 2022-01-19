@@ -21,3 +21,8 @@ or (for SVC/Logistic)
 ```python src/train_ml.py```
 
 The results will be output to console, best model (according to validation loss) will be saved according to the modelcheckpoint callback, and tensorboards (loss/f1 plots) will be generated in the output folder.
+
+
+If there is an error regarding the fastText library (with reduce_model in the stack trace), look for util.py in fastText's source code installed via conda, and comment out lines 122-123, and add the following line:
+
+```out_reduced = ft_model.get_output_matrix()```
